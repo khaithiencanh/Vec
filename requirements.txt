@@ -1,0 +1,10 @@
+requests
+openai
+chromadb
+plotly
+pandas
+numpy
+scikit-learn
+python-dotenv
+fastapi
+uvicorn

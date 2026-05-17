@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ShopAI – Mua sắm thông minh</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- ── HEADER ── -->
+<header>
+  <div class="htop">
+    <div class="logo" onclick="goHome()">ShopAI</div>
+    <div class="sbar">
+      <input id="mainQ" placeholder="Tìm kiếm sản phẩm bằng mô tả tự nhiên..."
+             onkeydown="if(event.key==='Enter') doSearch()">
+      <button onclick="doSearch()">🔍</button>
+    </div>
+  </div>
+  <div class="hnav">
+    <a onclick="goHome()">🏠 Trang chủ</a>
+    <a onclick="filterCat('áo thun nam')">👕 Thời trang</a>
+    <a onclick="filterCat('điện thoại samsung')">📱 Điện thoại</a>
+    <a onclick="filterCat('máy tính xách tay')">💻 Laptop</a>
+    <a onclick="filterCat('tai nghe bluetooth')">🎧 Âm thanh</a>
+    <a onclick="filterCat('sách kỹ năng')">📚 Sách</a>
+  </div>
+</header>
+
+<!-- ── PRODUCT DETAIL (fullscreen overlay) ── -->
+<div class="detail-page" id="detailPage">
+  <div class="detail-nav">
+    <button class="back" onclick="closeDetail()">← Quay lại</button>
+    <div class="breadcrumb" id="detailBread"></div>
+  </div>
+  <div class="detail-wrap">
+    <div class="detail-top" id="detailTop"></div>
+    <div class="similar-section" id="simSection"></div>
+    <div id="simSentinel" style="height:40px;display:flex;align-items:center;justify-content:center">
+      <span id="simLoader" style="font-size:.8rem;color:var(--muted);display:none">Đang tải thêm...</span>
+    </div>
+  </div>
+</div>
+
+<!-- ── CHAT FAB ── -->
+<div class="fab" onclick="toggleChat()" title="Trợ lý AI">🤖</div>
+<div class="cpanel" id="cpanel">
+  <div class="chdr">
+    <div class="av">🤖</div>
+    <div class="ci2">
+      <div class="n">ShopAI Assistant</div>
+      <div class="s">● Trực tuyến · RAG + Vector DB</div>
+    </div>
+    <button class="cx" onclick="toggleChat()">✕</button>
+  </div>
+  <div class="cmsgs" id="cmsgs">
+    <div class="cm ai">
+      <div class="a">🤖</div>
+      <div class="b">Xin chào! Hỏi tôi bất kỳ điều gì về sản phẩm nhé 🛍️</div>
+    </div>
+  </div>
+  <div class="cqs">
+    <div class="cq" onclick="qchat('Điện thoại tầm trung chụp ảnh đẹp')">📱 Điện thoại tầm trung</div>
+    <div class="cq" onclick="qchat('Sách kỹ năng hay nên đọc')">📚 Sách hay nên đọc</div>
+    <div class="cq" onclick="qchat('Giày chạy bộ nam êm chân')">👟 Giày chạy bộ</div>
+  </div>
+  <div class="cfooter">
+    <input id="cinp" placeholder="Nhắn tin..."
+           onkeydown="if(event.key==='Enter') sendChat()">
+    <button onclick="sendChat()">➤</button>
+  </div>
+</div>
+
+<!-- ── HOME PAGE ── -->
+<div id="homePage">
+  <div class="wrap">
+
+    <!-- Categories -->
+    <div class="cat-row">
+      <h3>Danh mục sản phẩm</h3>
+      <div class="cat-grid" id="catGrid"></div>
+    </div>
+
+    <!-- Products -->
+    <div class="section">
+      <div class="sec-head">
+        <div class="sec-title" id="secTitle">🔥 Gợi ý hôm nay</div>
+        <div class="sort-tabs">
+          <button class="stab active" onclick="setSort('rating', this)">Phổ biến</button>
+          <button class="stab" onclick="setSort('price_asc', this)">Giá tăng</button>
+          <button class="stab" onclick="setSort('price_desc', this)">Giá giảm</button>
+        </div>
+      </div>
+      <div class="pgrid" id="pgrid">
+        <div class="loader" style="grid-column:1/-1">Đang tải...</div>
+      </div>
+    </div>
+
+    <!-- Infinite scroll sentinel -->
+    <div id="scrollEnd" style="height:40px;display:flex;align-items:center;justify-content:center">
+      <span id="scrollLoader" style="font-size:.8rem;color:var(--muted);display:none">Đang tải thêm...</span>
+    </div>
+
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
