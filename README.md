@@ -56,9 +56,6 @@ Crawl sản phẩm từ Tiki API, lưu vào CSV:
 # Crawl toàn bộ danh mục (~7,000 sản phẩm)
 python scripts/tiki_crawler.py
 
-# Crawl thêm laptop (nếu cần)
-python scripts/crawl_laptop.py
-```
 
 > Dữ liệu lưu tại: `data/raw/tiki_products.csv`
 
