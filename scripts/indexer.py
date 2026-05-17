@@ -1,17 +1,20 @@
 import os
 import csv
 import chromadb
-from openai import OpenAI
+from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
 
 load_dotenv()
 
-CSV_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "raw", "tiki_products.csv")
-CHROMA_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "chroma")
+CSV_FILE       = os.path.join(os.path.dirname(__file__), "..", "data", "raw", "tiki_products.csv")
+CHROMA_DIR     = os.path.join(os.path.dirname(__file__), "..", "data", "chroma")
 COLLECTION_NAME = "tiki_products"
-BATCH_SIZE = 100  # Số sản phẩm embed mỗi lần gọi API
+BATCH_SIZE     = 256   # sentence-transformers xử lý cực nhanh, batch lớn được
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+print("Đang load embedding model (lần đầu download ~470MB)...")
+embed_model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+print("Model sẵn sàng!\n")
+
 chroma_client = chromadb.PersistentClient(path=CHROMA_DIR)
 
 
@@ -34,11 +37,8 @@ def make_text(row: dict) -> str:
 
 
 def embed_batch(texts: list[str]) -> list[list[float]]:
-    response = client.embeddings.create(
-        model="text-embedding-3-small",
-        input=texts,
-    )
-    return [item.embedding for item in response.data]
+    """Embed local bằng sentence-transformers — không cần API key."""
+    return embed_model.encode(texts, show_progress_bar=False, batch_size=64).tolist()
 
 
 def load_csv() -> list[dict]:
@@ -46,7 +46,7 @@ def load_csv() -> list[dict]:
     with open(CSV_FILE, encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            if row.get("name"):  # Bỏ qua row trống
+            if row.get("name"):
                 products.append(row)
     return products
 
@@ -56,8 +56,12 @@ def index():
     products = load_csv()
     print(f"  {len(products)} sản phẩm\n")
 
-    # Tạo hoặc reset collection
-    chroma_client.delete_collection(COLLECTION_NAME) if COLLECTION_NAME in [c.name for c in chroma_client.list_collections()] else None
+    # Xóa collection cũ (quan trọng: số chiều đã đổi từ 1536 → 384)
+    existing = [c.name for c in chroma_client.list_collections()]
+    if COLLECTION_NAME in existing:
+        chroma_client.delete_collection(COLLECTION_NAME)
+        print("  Đã xóa collection cũ (1536 chiều)\n")
+
     collection = chroma_client.create_collection(
         name=COLLECTION_NAME,
         metadata={"hnsw:space": "cosine"},
@@ -66,26 +70,25 @@ def index():
     total = 0
     for i in range(0, len(products), BATCH_SIZE):
         batch = products[i : i + BATCH_SIZE]
-
         texts = [make_text(p) for p in batch]
-        ids = [str(p["id"]) if p.get("id") else f"idx_{i+j}" for j, p in enumerate(batch)]
+        ids   = [str(p["id"]) if p.get("id") else f"idx_{i+j}" for j, p in enumerate(batch)]
         metadatas = [
             {
-                "name": p.get("name", ""),
-                "price": float(p.get("price", 0) or 0),
+                "name":           p.get("name", ""),
+                "price":          float(p.get("price", 0) or 0),
                 "original_price": float(p.get("original_price", 0) or 0),
-                "discount": int(p.get("discount", 0) or 0),
-                "rating": float(p.get("rating", 0) or 0),
-                "sold": int(p.get("sold", 0) or 0),
-                "brand": p.get("brand", ""),
-                "keyword": p.get("keyword", ""),
-                "thumbnail_url": p.get("thumbnail_url", ""),
-                "url": p.get("url", ""),
+                "discount":       int(p.get("discount", 0) or 0),
+                "rating":         float(p.get("rating", 0) or 0),
+                "sold":           int(p.get("sold", 0) or 0),
+                "brand":          p.get("brand", ""),
+                "keyword":        p.get("keyword", ""),
+                "thumbnail_url":  p.get("thumbnail_url", ""),
+                "url":            p.get("url", ""),
             }
             for p in batch
         ]
 
-        print(f"Embedding batch {i // BATCH_SIZE + 1} ({len(batch)} sản phẩm)...")
+        print(f"Embedding batch {i // BATCH_SIZE + 1}/{-(-len(products)//BATCH_SIZE)} ({len(batch)} sản phẩm)...")
         embeddings = embed_batch(texts)
 
         collection.add(
@@ -96,9 +99,10 @@ def index():
         )
 
         total += len(batch)
-        print(f"  Đã index {total}/{len(products)} sản phẩm")
+        print(f"  ✓ {total}/{len(products)} sản phẩm")
 
-    print(f"\nHoàn thành! {total} sản phẩm đã lưu vào ChromaDB tại {CHROMA_DIR}")
+    print(f"\nHoàn thành! {total} sản phẩm → ChromaDB ({CHROMA_DIR})")
+    print(f"Số chiều vector: {len(embeddings[0])} (paraphrase-multilingual-MiniLM-L12-v2)")
 
 
 if __name__ == "__main__":

@@ -33,6 +33,19 @@ let page = 1, curCat = '', sortMode = 'rating', searchMode = false;
 let isLoading = false, hasMore = true;
 let scrollObserver = null;
 
+// Global product cache — dùng để tránh nhúng JSON vào onclick (dễ vỡ với ký tự đặc biệt)
+const _pmap = {};
+let _pmapCounter = 0;
+function storeProduct(p) {
+  const key = 'p' + (++_pmapCounter);
+  _pmap[key] = p;
+  return key;
+}
+function openDetailByKey(key) {
+  const p = _pmap[key];
+  if (p) openDetail(p);
+}
+
 /* ── HELPERS ── */
 function emo(k) { return EMOJIS[k] || '📦'; }
 function fmtP(p) { return p ? Number(p).toLocaleString('vi-VN') + '₫' : '—'; }
@@ -63,10 +76,11 @@ function pcard(p, showSim = false) {
       <span class="sim-label">${pct}% match</span>
     </div>` : '';
 
-  return `<div class="pc" onclick='openDetail(${JSON.stringify(p).replace(/'/g, "\\'")}  )'>
-    <div class="thumb" style="background:${bgc(p.id)}">
+  const _key = storeProduct(p);
+  return `<div class="pc" onclick="openDetailByKey('${_key}')">
+    <div class="thumb" style="background:${bgc(p.id || p.name)}">
       <img src="${imgSrc(p)}" loading="lazy"
-           onerror="this.onerror=null;this.src='https://picsum.photos/seed/${p.id}/300/300'">
+           onerror="this.onerror=null;this.src='https://picsum.photos/seed/${encodeURIComponent(p.name||'x')}/300/300'">
       ${disc > 0 ? `<div class="disc">-${disc}%</div>` : ''}
       ${sold > 200 ? '<div class="hot">HOT</div>' : ''}
     </div>
@@ -251,13 +265,17 @@ async function openDetail(p) {
         <div class="row"><span class="lbl">Danh mục</span><span class="val">${p.keyword || ''}</span></div>
         <div class="row"><span class="lbl">Đánh giá</span><span class="val">${stars(p.rating)} ${p.rating || 0}/5</span></div>
       </div>
-      <button class="btn-buy" onclick="window.open('${p.url || '#'}', '_blank')">🔗 Xem trên Tiki</button>
+      <button class="btn-buy" id="btnBuyDetail">🔗 Xem trên Tiki</button>
     </div>`;
+
+  // Gán URL cho nút Xem trên Tiki sau khi render (tránh ký tự đặc biệt trong onclick)
+  const btnBuy = document.getElementById('btnBuyDetail');
+  if (btnBuy) btnBuy.onclick = () => window.open(p.url || '#', '_blank');
 
   // Reset similar products state
   simProducts = [];
   simShown = 0;
-  if (simObserver) simObserver.disconnect();
+  if (simObserver) { simObserver.disconnect(); simObserver = null; }
   document.getElementById('simLoader').style.display = 'none';
 
   document.getElementById('simSection').innerHTML = `
@@ -267,14 +285,20 @@ async function openDetail(p) {
     </div>
     <div class="loader">Đang tìm sản phẩm tương đồng...</div>`;
 
-  // Fetch 50 similar products upfront
-  const rec = await fetch('/api/recommend', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query: `${p.name} ${p.keyword}`, n: 51 }),
-  }).then(r => r.json());
+  // Fetch similar products (error-safe)
+  try {
+    const rec = await fetch('/api/recommend', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: `${p.name} ${p.keyword}`, n: 40 }),
+    }).then(r => r.json());
 
-  simProducts = rec.results.filter(r => r.name !== p.name);
+    simProducts = (rec.results || []).filter(r => r.name !== p.name);
+  } catch (e) {
+    document.getElementById('simSection').innerHTML =
+      '<div class="loader">Không thể tải sản phẩm tương tự.</div>';
+    return;
+  }
 
   // Render header + empty grid
   document.getElementById('simSection').innerHTML = `
@@ -287,13 +311,19 @@ async function openDetail(p) {
   // Show first batch
   appendSimBatch();
 
-  // Watch sentinel for infinite scroll inside detail overlay
-  simObserver = new IntersectionObserver(entries => {
-    if (entries[0].isIntersecting && simShown < simProducts.length) {
-      appendSimBatch();
-    }
-  }, { root: document.getElementById('detailPage'), threshold: 0.1 });
-  simObserver.observe(document.getElementById('simSentinel'));
+  // Infinite scroll inside detailPage via scroll event (đáng tin cậy hơn IntersectionObserver)
+  const detailEl = document.getElementById('detailPage');
+  const onDetailScroll = () => {
+    const sentinel = document.getElementById('simSentinel');
+    if (!sentinel || simShown >= simProducts.length) return;
+    const sentinelTop = sentinel.getBoundingClientRect().top;
+    const detailBottom = detailEl.getBoundingClientRect().bottom;
+    if (sentinelTop < detailBottom + 300) appendSimBatch();
+  };
+  // Xóa listener cũ nếu có
+  detailEl.removeEventListener('scroll', detailEl._simScroll);
+  detailEl._simScroll = onDetailScroll;
+  detailEl.addEventListener('scroll', onDetailScroll);
 }
 
 function appendSimBatch() {

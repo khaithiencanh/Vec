@@ -3,10 +3,11 @@ import numpy as np
 import pandas as pd
 import chromadb
 from openai import OpenAI
+from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import json
 
@@ -17,7 +18,18 @@ CHROMA_DIR = os.path.join(ROOT, "data", "chroma")
 CSV_FILE   = os.path.join(ROOT, "data", "raw", "tiki_products.csv")
 COLLECTION = "tiki_products"
 
-ai     = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# ── Embedding: chạy local, hoàn toàn miễn phí ──
+print("Đang load embedding model...")
+_embed_model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+print("Embedding model sẵn sàng!")
+
+# ── LLM: Groq (miễn phí, nhanh, tương thích OpenAI SDK) ──
+ai = OpenAI(
+    api_key=os.getenv("GROQ_API_KEY"),
+    base_url="https://api.groq.com/openai/v1",
+)
+LLM_MODEL = "llama-3.1-8b-instant"
+
 chroma = chromadb.PersistentClient(path=CHROMA_DIR)
 col    = chroma.get_collection(COLLECTION)
 df     = pd.read_csv(CSV_FILE, encoding="utf-8-sig").dropna(subset=["name"])
@@ -30,7 +42,7 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
 def embed(text: str):
-    return ai.embeddings.create(model="text-embedding-3-small", input=text).data[0].embedding
+    return _embed_model.encode(text).tolist()
 
 def vsearch(query: str, n: int = 8, category: str = ""):
     vec = embed(query)
@@ -102,24 +114,29 @@ class SearchReq(BaseModel):
 @app.post("/api/search")
 def search(req: SearchReq):
     t0 = time.time()
-    # Nếu query ngắn và mơ hồ thì expand trước
-    query = req.query
-    if len(query.split()) <= 3:
-        expand_resp = ai.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role":"user","content":f'Mở rộng query tìm kiếm sản phẩm "{query}" thành mô tả chi tiết hơn (1 câu ngắn tiếng Việt, chỉ trả về câu đó):'}],
-            max_tokens=60,
-        )
-        expanded = expand_resp.choices[0].message.content.strip()
-        query = f"{req.query} {expanded}"
-    results = vsearch(query, req.n)
-    return {"results": results, "elapsed": round(time.time()-t0, 3), "query": query}
+    try:
+        query = req.query
+        if len(query.split()) <= 3:
+            expand_resp = ai.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[{"role":"user","content":f'Mở rộng query tìm kiếm sản phẩm "{query}" thành mô tả chi tiết hơn (1 câu ngắn tiếng Việt, chỉ trả về câu đó):'}],
+                max_tokens=60,
+            )
+            expanded = expand_resp.choices[0].message.content.strip()
+            query = f"{req.query} {expanded}"
+        results = vsearch(query, req.n)
+        return {"results": results, "elapsed": round(time.time()-t0, 3), "query": query}
+    except Exception as e:
+        return {"results": [], "elapsed": 0, "query": req.query, "error": str(e)}
 
 @app.post("/api/recommend")
 def recommend(req: SearchReq):
-    results = vsearch(req.query, req.n + 1)
-    results = [r for r in results if r.get("name") != req.query][:req.n]
-    return {"results": results}
+    try:
+        results = vsearch(req.query, req.n + 1)
+        results = [r for r in results if r.get("name") != req.query][:req.n]
+        return {"results": results}
+    except Exception as e:
+        return {"results": [], "error": str(e)}
 
 class ChatReq(BaseModel):
     message: str
@@ -131,7 +148,7 @@ def parse_intent(message: str) -> dict:
     cats_str = "\n".join(f"- {c}" for c in known_cats)
 
     resp = ai.chat.completions.create(
-        model="gpt-4o-mini",
+        model=LLM_MODEL,
         messages=[{
             "role": "user",
             "content": f"""Phân tích yêu cầu mua sắm sau và trả về JSON.
@@ -260,7 +277,7 @@ Nguyên tắc:
     messages.append({"role": "user", "content": user_content})
 
     response = ai.chat.completions.create(
-        model="gpt-4o-mini",
+        model=LLM_MODEL,
         messages=messages,
         max_tokens=450,
     )
